@@ -173,7 +173,9 @@ func (c *Client) getRaw(ctx context.Context, path string) (io.ReadCloser, error)
 	if err != nil {
 		return nil, err
 	}
-
+	if !res.IsSuccess() {
+		return nil, buildResponseError(res)
+	}
 	return res.Body, nil
 }
 

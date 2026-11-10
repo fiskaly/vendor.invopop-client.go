@@ -1,9 +1,11 @@
 package invopop
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"resty.dev/v3"
 )
@@ -40,6 +42,33 @@ func (r *ResponseError) handle(res *resty.Response) error {
 	return r
 }
 
+func buildResponseError(res *resty.Response) *ResponseError {
+	re := &ResponseError{response: res}
+	body := strings.TrimSpace(res.String())
+	if body != "" {
+		if err := json.Unmarshal([]byte(body), re); err == nil && (re.Code != "" || re.Message != "") {
+			return re
+		}
+	}
+	re.Message = rawErrorMessage(res)
+	return re
+}
+
+// rawErrorMessage provides a fallback message for error responses whose body
+// could not be decoded into a ResponseError, such as plain-text or HTML pages
+// returned by gateways or proxies.
+func rawErrorMessage(res *resty.Response) string {
+	const maxLength = 512
+	body := strings.TrimSpace(res.String())
+	if body == "" {
+		return http.StatusText(res.StatusCode())
+	}
+	if len(body) > maxLength {
+		return body[:maxLength] + "..."
+	}
+	return body
+}
+
 // StatusCode provides the response status code, or 0 if an error occurred.
 func (r *ResponseError) StatusCode() int {
 	return r.response.StatusCode()
@@ -47,10 +76,31 @@ func (r *ResponseError) StatusCode() int {
 
 // Error provides the response error string.
 func (r *ResponseError) Error() string {
-	if r.Code != "" {
-		return fmt.Sprintf("%d: (%s) %s", r.response.StatusCode(), r.Code, r.Message)
+	if r.response == nil {
+		return ""
 	}
-	return fmt.Sprintf("%d: %v", r.response.StatusCode(), r.Message)
+
+	statusCode := r.response.StatusCode()
+	if r.Message == "" {
+		message := ""
+		if r.response != nil {
+			if s := r.response.String(); s != "" {
+				message = strings.TrimSpace(s)
+			}
+		}
+		if message == "" {
+			message = http.StatusText(statusCode)
+		}
+		if len(message) > 512 {
+			message = message[:512] + "..."
+		}
+		r.Message = message
+	}
+
+	if r.Code != "" {
+		return fmt.Sprintf("%d: (%s) %s", statusCode, r.Code, r.Message)
+	}
+	return fmt.Sprintf("%d: %s", statusCode, r.Message)
 }
 
 // Response provides underlying response, in case it might be useful for
